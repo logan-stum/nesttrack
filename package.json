@@ -2,16 +2,20 @@
   "name": "nesttrack",
   "version": "0.1.0",
   "private": false,
+  "type": "module",
   "description": "A dark-mode housing listing tracker with pros/cons, price history, and side-by-side comparison",
   "author": "Your Name <you@example.com>",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "lint": "eslint src --ext .js,.jsx"
+    "server": "node server.js",
+    "start": "concurrently \"npm run dev\" \"npm run server\""
   },
   "dependencies": {
+    "concurrently": "^9.2.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0"
   },

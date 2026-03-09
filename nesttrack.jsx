@@ -585,70 +585,120 @@ const DEF_FORM = {
   lotSize: "", hoaFees: "", taxes: "",
 };
 
+/* ─── LOCALSTORAGE HELPERS ─────────────────────────────────────── */
+const STORAGE_KEY = "nesttrack_listings";
+const COMPARE_KEY = "nesttrack_compare";
+
+const loadListings = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : SAMPLE;
+  } catch { return SAMPLE; }
+};
+
+const saveListings = (listings) => {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(listings)); } catch {}
+};
+
+const loadCompare = () => {
+  try {
+    const saved = localStorage.getItem(COMPARE_KEY);
+    return saved ? JSON.parse(saved) : [1, 2];
+  } catch { return [1, 2]; }
+};
+
 /* ─── APP ──────────────────────────────────────────────────────── */
 export default function NestTrack() {
-  const [listings, setListings] = useState(SAMPLE);
+  const [listings, setListingsRaw] = useState(loadListings);
   const [tab, setTab] = useState("all"); // all | favorites | compare
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(DEF_FORM);
   const [fetchUrl, setFetchUrl] = useState("");
   const [fetchStatus, setFetchStatus] = useState(null); // null | loading | success | error
   const [selectedId, setSelectedId] = useState(null);
-  const [compareIds, setCompareIds] = useState([1, 2]);
+  const [compareIds, setCompareIdsRaw] = useState(loadCompare);
   const [statusFilter, setStatusFilter] = useState("All");
   const [copied, setCopied] = useState(false);
   const [priceAddForm, setPriceAddForm] = useState({ price: "", note: "" });
   const proRefs = useRef({});
   const conRefs = useRef({});
 
+  // Wrap setListings to always persist to localStorage
+  const setListings = (updater) => {
+    setListingsRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      saveListings(next);
+      return next;
+    });
+  };
+
+  // Wrap setCompareIds to persist too
+  const setCompareIds = (updater) => {
+    setCompareIdsRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      try { localStorage.setItem(COMPARE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
   const selected = listings.find(l => l.id === selectedId);
   const upd = (id, patch) => setListings(ls => ls.map(l => l.id === id ? { ...l, ...patch } : l));
 
-  /* FETCH LISTING FROM URL via Claude API */
+  /* FETCH LISTING FROM URL via RapidAPI */
   const fetchListing = async () => {
     if (!fetchUrl.trim()) return;
     setFetchStatus("loading");
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: `You extract real estate listing data from a URL or text description. 
-Return ONLY a valid JSON object (no markdown, no extra text) with these exact keys:
-address, price (number only, no $), beds (number), baths (number), sqft (number), yearBuilt (number), 
-status (one of: Active, Pending, Sold, Off Market), lotSize, hoaFees, taxes, source (site name), imageUrl.
-If you can't determine a value, use null. Extract source from the URL domain (Zillow, Redfin, Realtor, Trulia, etc).`,
-          messages: [{
-            role: "user",
-            content: `Extract listing data from this URL or description: ${fetchUrl}`
-          }]
-        })
-      });
-      const data = await res.json();
-      const text = data.content?.map(b => b.text || "").join("").trim();
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
+      const [detailsRes, photosRes] = await Promise.all([
+        fetch(`http://localhost:3001/api/fetch-listing?url=${encodeURIComponent(fetchUrl)}`),
+        fetch(`http://localhost:3001/api/fetch-photos?url=${encodeURIComponent(fetchUrl)}`),
+      ]);
+      const data = await detailsRes.json();
+      const photoData = await photosRes.json();
+      console.log("PHOTO DATA:", JSON.stringify(photoData, null, 2)); // ADD THIS
+
+
+      if (!data.success || !data.property) throw new Error("No property data");
+
+      const p = data.property;
+      const addr = p.address;
+      const fullAddress = `${addr.streetAddress}, ${addr.city}, ${addr.state} ${addr.zipcode}`;
+      const sqft = p.livingArea?.value || 0;
+      const lotSize = p.lotArea ? `${p.lotArea.value.toFixed(2)} ${p.lotArea.units}` : "";
+      const hoaFees = p.facts_features?.financial_hoa?.hoaFee || "None";
+      const taxes = p.propertyTaxRate ? `${p.propertyTaxRate}% rate` : "";
+      const status = p.homeStatus === "FOR_SALE" ? "Active"
+        : p.homeStatus === "PENDING" ? "Pending"
+        : p.homeStatus === "SOLD" ? "Sold"
+        : "Active";
+
+      // Extract first photo — API may return different shapes
+      const photos = photoData?.images || photoData?.photos || photoData?.data || [];
+      const firstPhoto = Array.isArray(photos) && photos.length > 0
+        ? (photos[0]?.url || photos[0]?.src || photos[0]?.mixedSources?.jpeg?.[0]?.url || "")
+        : "";
+
       setForm(f => ({
         ...f,
-        address: parsed.address || f.address,
-        price: parsed.price || f.price,
-        beds: parsed.beds || f.beds,
-        baths: parsed.baths || f.baths,
-        sqft: parsed.sqft || f.sqft,
-        yearBuilt: parsed.yearBuilt || f.yearBuilt,
-        status: parsed.status || f.status,
-        lotSize: parsed.lotSize || f.lotSize,
-        hoaFees: parsed.hoaFees || f.hoaFees,
-        taxes: parsed.taxes || f.taxes,
-        source: parsed.source || f.source,
-        imageUrl: parsed.imageUrl || f.imageUrl,
+        address: fullAddress,
+        price: p.price || f.price,
+        beds: p.bedrooms || f.beds,
+        baths: p.bathrooms || f.baths,
+        sqft,
+        yearBuilt: p.yearBuilt || f.yearBuilt,
+        lotSize,
+        hoaFees,
+        taxes,
+        status,
         url: fetchUrl,
+        source: "Zillow",
+        imageUrl: firstPhoto || f.imageUrl,
+        notes: p.description ? p.description.slice(0, 300) + "..." : "",
       }));
       setFetchStatus("success");
       setShowAdd(true);
-    } catch {
+    } catch (err) {
+      console.error("Fetch error:", err);
       setFetchStatus("error");
       setForm(f => ({ ...f, url: fetchUrl }));
       setShowAdd(true);
