@@ -26,7 +26,7 @@ app.get("/api/fetch-listing", async (req, res) => {
     const data = await response.json();
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message }); 
   }
 });
 
