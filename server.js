@@ -36,7 +36,7 @@ app.get("/api/fetch-photos", async (req, res) => {
   const { url } = req.query;
   try {
     const response = await fetch(
-      `https://real-estate101.p.rapidapi.com/api/property-details/photos?url=${encodeURIComponent(url)}`,
+      `https://real-estate101.p.rapidapi.com/api/property-info/photos?url=${encodeURIComponent(url)}`,
       {
         headers: {
           "x-rapidapi-host": "real-estate101.p.rapidapi.com",

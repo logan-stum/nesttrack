@@ -1,4 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 /* ─── FONTS & GLOBAL STYLES ─────────────────────────────────────── */
 const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=Fira+Code:wght@400;500&family=Lato:wght@300;400;700&display=swap');`;
@@ -527,49 +530,40 @@ textarea.form-input { resize: vertical; min-height: 72px; font-family: 'Lato', s
   .pc-grid { grid-template-columns: 1fr; }
   .ratings-grid { grid-template-columns: 1fr; }
   .modal { max-height: 98vh; }
-  .modal-body { padding: 16px 18px 22px; }
 }
 `;
 
-/* ─── HELPERS ─────────────────────────────────────────────────── */
-const fmt = n => n ? `$${Number(n).toLocaleString()}` : "—";
-const fmtDate = d => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-const slug = s => s.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+/* ─── SUPABASE ───────────────────────────────────────────────────── */
+const SUPABASE_URL = "https://bifykhstrzdokkiqkjbr.supabase.co";
+const SUPABASE_KEY = "sb_publishable_vJPpE29KGgj9F5qJmReBqQ_ZVepTbyv";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const priceDiff = (history) => {
-  if (!history || history.length < 2) return null;
-  const sorted = [...history].sort((a, b) => new Date(a.date) - new Date(b.date));
-  const diff = sorted[sorted.length - 1].price - sorted[0].price;
-  return diff;
-};
-
-/* ─── INITIAL DATA ─────────────────────────────────────────────── */
+/* ─── SAMPLE DATA ────────────────────────────────────────────────── */
 const SAMPLE = [
   {
     id: 1, address: "2847 Maple Grove Drive, Austin, TX 78702",
     price: 485000, beds: 3, baths: 2, sqft: 1840, yearBuilt: 1998,
     url: "https://zillow.com", source: "Zillow", status: "Active",
-    notes: "Great neighborhood, walkable. Master bath needs updating. Seller may negotiate on closing costs.",
+    notes: "Great neighborhood, walkable. Master bath needs updating.",
     imageUrl: "", lotSize: "0.18 ac", hoaFees: "None", taxes: "$8,200/yr",
     favorited: true,
-    pros: ["Quiet street", "Updated kitchen", "Big backyard", "Walkable to shops"],
-    cons: ["No garage", "Small master bath", "Busy road nearby"],
+    pros: ["Quiet street", "Updated kitchen", "Big backyard"],
+    cons: ["No garage", "Small master bath"],
     ratings: { overall: 4, location: 5, value: 3, condition: 4 },
     priceHistory: [
       { date: "2025-11-01", price: 510000, note: "Listed" },
-      { date: "2025-12-15", price: 499000, note: "Price drop" },
-      { date: "2026-01-20", price: 485000, note: "Reduced again" },
+      { date: "2026-01-20", price: 485000, note: "Reduced" },
     ],
   },
   {
     id: 2, address: "518 Rosewood Lane, Austin, TX 78745",
     price: 529000, beds: 4, baths: 2.5, sqft: 2100, yearBuilt: 2005,
     url: "https://redfin.com", source: "Redfin", status: "Active",
-    notes: "Newer build. Good school district. Commute ~25min. HOA is strict about landscaping.",
+    notes: "Newer build. Good school district.",
     imageUrl: "", lotSize: "0.22 ac", hoaFees: "$120/mo", taxes: "$9,400/yr",
     favorited: false,
     pros: ["New roof (2022)", "4 bedrooms", "Top school district"],
-    cons: ["HOA fees", "Far from downtown", "Small yard"],
+    cons: ["HOA fees", "Far from downtown"],
     ratings: { overall: 3, location: 3, value: 3, condition: 5 },
     priceHistory: [
       { date: "2025-10-10", price: 545000, note: "Listed" },
@@ -585,45 +579,136 @@ const DEF_FORM = {
   lotSize: "", hoaFees: "", taxes: "",
 };
 
-/* ─── LOCALSTORAGE HELPERS ─────────────────────────────────────── */
+/* ─── LOCALSTORAGE HELPERS ───────────────────────────────────────── */
 const STORAGE_KEY = "nesttrack_listings";
 const COMPARE_KEY = "nesttrack_compare";
+const ROOM_KEY = "nesttrack_room";
 
 const loadListings = () => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : SAMPLE;
-  } catch { return SAMPLE; }
+  try { const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : SAMPLE; }
+  catch { return SAMPLE; }
 };
-
-const saveListings = (listings) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(listings)); } catch {}
-};
-
+const saveListings = (ls) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ls)); } catch {} };
 const loadCompare = () => {
-  try {
-    const saved = localStorage.getItem(COMPARE_KEY);
-    return saved ? JSON.parse(saved) : [1, 2];
-  } catch { return [1, 2]; }
+  try { const s = localStorage.getItem(COMPARE_KEY); return s ? JSON.parse(s) : []; }
+  catch { return []; }
 };
 
-/* ─── APP ──────────────────────────────────────────────────────── */
+/* ─── ROOM CODE GENERATOR ────────────────────────────────────────── */
+const WORDS = ["MAPLE","CEDAR","BIRCH","WILLOW","PINE","OAK","RIVER","STONE","AMBER","CORAL"];
+const genCode = () => `${WORDS[Math.floor(Math.random()*WORDS.length)]}-${Math.floor(1000+Math.random()*9000)}`;
+
+/* ─── EXTRA CSS FOR ROOM UI ──────────────────────────────────────── */
+const ROOM_CSS = `
+.room-bar {
+  background: var(--bg1); border-bottom: 1px solid var(--border);
+  padding: 8px 32px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.room-badge {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--teal-dim); border: 1px solid rgba(62,207,178,0.3);
+  border-radius: 8px; padding: 6px 14px;
+  font-family: 'Fira Code', monospace; font-size: 12px; color: var(--teal);
+}
+.room-badge-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--teal);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.room-code { font-weight: 700; letter-spacing: 1px; font-size: 14px; }
+.room-members { font-size: 11px; color: var(--text2); }
+.room-actions { display: flex; gap: 6px; margin-left: auto; }
+
+.room-modal-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(5,7,10,0.85); backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: fadeIn 0.18s;
+}
+.room-modal {
+  background: var(--bg1); border: 1px solid var(--border-hi);
+  border-radius: 20px; width: 100%; max-width: 480px;
+  padding: 32px; box-shadow: var(--shadow-lg);
+  animation: slideUp 0.22s cubic-bezier(.22,.68,0,1.2);
+}
+.room-modal-title {
+  font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800;
+  color: var(--text0); margin-bottom: 6px;
+}
+.room-modal-sub { font-size: 13px; color: var(--text2); margin-bottom: 24px; line-height: 1.5; }
+.room-option {
+  background: var(--bg2); border: 1px solid var(--border-hi);
+  border-radius: 12px; padding: 18px 20px; cursor: pointer;
+  transition: all 0.15s; margin-bottom: 10px;
+}
+.room-option:hover { border-color: var(--teal); background: var(--bg3); }
+.room-option-title {
+  font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700;
+  color: var(--text0); margin-bottom: 4px; display: flex; align-items: center; gap: 8px;
+}
+.room-option-sub { font-size: 12px; color: var(--text2); }
+.room-divider {
+  display: flex; align-items: center; gap: 10px; margin: 16px 0;
+}
+.room-divider-line { flex: 1; height: 1px; background: var(--border); }
+.room-divider-text { font-size: 11px; color: var(--text2); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+.room-created-code {
+  background: var(--bg3); border: 1px solid rgba(62,207,178,0.3);
+  border-radius: 12px; padding: 20px; text-align: center; margin: 16px 0;
+}
+.room-created-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-weight: 700; }
+.room-created-value {
+  font-family: 'Fira Code', monospace; font-size: 28px; font-weight: 700;
+  color: var(--teal); letter-spacing: 3px;
+}
+.room-created-hint { font-size: 12px; color: var(--text2); margin-top: 8px; }
+.room-join-input {
+  width: 100%; background: var(--bg2); border: 1px solid var(--border-hi);
+  border-radius: 10px; padding: 12px 16px; margin: 12px 0;
+  font-family: 'Fira Code', monospace; font-size: 16px; color: var(--teal);
+  outline: none; text-align: center; text-transform: uppercase; letter-spacing: 2px;
+  transition: border-color 0.15s;
+}
+.room-join-input:focus { border-color: var(--teal); background: var(--bg3); }
+.room-join-input::placeholder { color: var(--text2); letter-spacing: 1px; font-size: 13px; text-transform: none; }
+.room-error { color: var(--red); font-size: 12px; font-family: 'Fira Code', monospace; margin-top: 6px; text-align: center; }
+.room-sync-indicator {
+  font-family: 'Fira Code', monospace; font-size: 10px;
+  padding: 3px 8px; border-radius: 5px; margin-left: 6px;
+}
+.room-sync-indicator.syncing { background: var(--amber-dim); color: var(--amber); }
+.room-sync-indicator.synced { background: var(--green-dim); color: var(--green); }
+`;
+
+/* ─── APP ──────────────────────────────────────────────────────────── */
 export default function NestTrack() {
   const [listings, setListingsRaw] = useState(loadListings);
-  const [tab, setTab] = useState("all"); // all | favorites | compare
+  const [tab, setTab] = useState("all");
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(DEF_FORM);
   const [fetchUrl, setFetchUrl] = useState("");
-  const [fetchStatus, setFetchStatus] = useState(null); // null | loading | success | error
+  const [fetchStatus, setFetchStatus] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [compareIds, setCompareIdsRaw] = useState(loadCompare);
   const [statusFilter, setStatusFilter] = useState("All");
   const [copied, setCopied] = useState(false);
   const [priceAddForm, setPriceAddForm] = useState({ price: "", note: "" });
+
+  // Room state
+  const [roomId, setRoomId] = useState(() => localStorage.getItem(ROOM_KEY) || null);
+  const [showRoomModal, setShowRoomModal] = useState(false);
+  const [roomStep, setRoomStep] = useState("choose"); // choose | creating | created | joining
+  const [newRoomCode, setNewRoomCode] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [syncStatus, setSyncStatus] = useState("synced"); // synced | syncing
+  const [roomCopied, setRoomCopied] = useState(false);
+
   const proRefs = useRef({});
   const conRefs = useRef({});
+  const realtimeRef = useRef(null);
 
-  // Wrap setListings to always persist to localStorage
+  // Wrap setListings to persist locally and sync to Supabase if in a room
   const setListings = (updater) => {
     setListingsRaw(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -632,7 +717,6 @@ export default function NestTrack() {
     });
   };
 
-  // Wrap setCompareIds to persist too
   const setCompareIds = (updater) => {
     setCompareIdsRaw(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -641,27 +725,152 @@ export default function NestTrack() {
     });
   };
 
+  // Sync a single listing to Supabase
+  const syncListing = async (listing) => {
+    if (!roomId) return;
+    setSyncStatus("syncing");
+    await supabase.from("listings").upsert({
+      id: listing.id,
+      room_id: roomId,
+      data: listing,
+      updated_at: new Date().toISOString(),
+    });
+    setSyncStatus("synced");
+  };
+
+  // Sync all listings to Supabase
+  const syncAllListings = async (ls, rid) => {
+    if (!rid) return;
+    setSyncStatus("syncing");
+    const rows = ls.map(l => ({ id: l.id, room_id: rid, data: l, updated_at: new Date().toISOString() }));
+    await supabase.from("listings").upsert(rows);
+    setSyncStatus("synced");
+  };
+
+  // Wrapped upd that also syncs to Supabase
+  const upd = (id, patch) => {
+    setListingsRaw(prev => {
+      const next = prev.map(l => {
+        if (l.id !== id) return l;
+        const updated = { ...l, ...patch };
+        syncListing(updated);
+        return updated;
+      });
+      saveListings(next);
+      return next;
+    });
+  };
+
+  // Load listings from Supabase room
+  const loadRoomListings = async (rid) => {
+    const { data, error } = await supabase
+      .from("listings")
+      .select("data")
+      .eq("room_id", rid)
+      .order("updated_at", { ascending: true });
+    if (!error && data?.length > 0) {
+      const ls = data.map(r => r.data);
+      setListingsRaw(ls);
+      saveListings(ls);
+    }
+  };
+
+  // Subscribe to real-time changes
+  const subscribeToRoom = (rid) => {
+    if (realtimeRef.current) realtimeRef.current.unsubscribe();
+    realtimeRef.current = supabase
+      .channel(`room:${rid}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "listings",
+        filter: `room_id=eq.${rid}`,
+      }, (payload) => {
+        if (payload.eventType === "DELETE") {
+          setListingsRaw(prev => {
+            const next = prev.filter(l => l.id !== payload.old.id);
+            saveListings(next);
+            return next;
+          });
+        } else {
+          const incoming = payload.new.data;
+          setListingsRaw(prev => {
+            const exists = prev.find(l => l.id === incoming.id);
+            const next = exists
+              ? prev.map(l => l.id === incoming.id ? incoming : l)
+              : [...prev, incoming];
+            saveListings(next);
+            return next;
+          });
+        }
+      })
+      .subscribe();
+  };
+
+  // Join room on load if stored
+  useEffect(() => {
+    if (roomId) {
+      loadRoomListings(roomId);
+      subscribeToRoom(roomId);
+    }
+    return () => { if (realtimeRef.current) realtimeRef.current.unsubscribe(); };
+  }, []);
+
+  // CREATE ROOM
+  const createRoom = async () => {
+    const code = genCode();
+    setRoomStep("creating");
+    const { error } = await supabase.from("rooms").insert({ id: code });
+    if (error) { setRoomStep("choose"); return; }
+    // Push current listings into the room
+    await syncAllListings(listings, code);
+    setRoomId(code);
+    localStorage.setItem(ROOM_KEY, code);
+    subscribeToRoom(code);
+    setNewRoomCode(code);
+    setRoomStep("created");
+  };
+
+  // JOIN ROOM
+  const joinRoom = async () => {
+    setJoinError("");
+    const code = joinCode.trim().toUpperCase();
+    if (!code) return;
+    const { data, error } = await supabase.from("rooms").select("id").eq("id", code).single();
+    if (error || !data) { setJoinError("Room not found. Check the code and try again."); return; }
+    setRoomId(code);
+    localStorage.setItem(ROOM_KEY, code);
+    await loadRoomListings(code);
+    subscribeToRoom(code);
+    setShowRoomModal(false);
+    setRoomStep("choose");
+    setJoinCode("");
+  };
+
+  // LEAVE ROOM
+  const leaveRoom = () => {
+    if (realtimeRef.current) realtimeRef.current.unsubscribe();
+    setRoomId(null);
+    localStorage.removeItem(ROOM_KEY);
+    setListingsRaw(SAMPLE);
+    saveListings(SAMPLE);
+  };
+
   const selected = listings.find(l => l.id === selectedId);
-  const upd = (id, patch) => setListings(ls => ls.map(l => l.id === id ? { ...l, ...patch } : l));
 
   /* FETCH LISTING FROM URL via RapidAPI */
   const fetchListing = async () => {
     if (!fetchUrl.trim()) return;
     setFetchStatus("loading");
-    const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
-
     try {
-        const [detailsRes, photosRes] = await Promise.all([
-          fetch(`${API_BASE}/api/fetch-listing?url=${encodeURIComponent(fetchUrl)}`),
-          fetch(`${API_BASE}/api/fetch-photos?url=${encodeURIComponent(fetchUrl)}`),
-        ]);
+      const [detailsRes, photosRes] = await Promise.all([
+        fetch(`${API_BASE}/api/fetch-listing?url=${encodeURIComponent(fetchUrl)}`),
+        fetch(`${API_BASE}/api/fetch-photos?url=${encodeURIComponent(fetchUrl)}`),
+      ]);
       const data = await detailsRes.json();
       const photoData = await photosRes.json();
-      console.log("PHOTO DATA:", JSON.stringify(photoData, null, 2)); // ADD THIS
-
-
+      console.log("PHOTO DATA:", JSON.stringify(photoData, null, 2));
       if (!data.success || !data.property) throw new Error("No property data");
-
       const p = data.property;
       const addr = p.address;
       const fullAddress = `${addr.streetAddress}, ${addr.city}, ${addr.state} ${addr.zipcode}`;
@@ -671,30 +880,15 @@ export default function NestTrack() {
       const taxes = p.propertyTaxRate ? `${p.propertyTaxRate}% rate` : "";
       const status = p.homeStatus === "FOR_SALE" ? "Active"
         : p.homeStatus === "PENDING" ? "Pending"
-        : p.homeStatus === "SOLD" ? "Sold"
-        : "Active";
-
-      // Extract first photo — API may return different shapes
+        : p.homeStatus === "SOLD" ? "Sold" : "Active";
       const photos = photoData?.images || photoData?.photos || photoData?.data || [];
       const firstPhoto = Array.isArray(photos) && photos.length > 0
-        ? (photos[0]?.url || photos[0]?.src || photos[0]?.mixedSources?.jpeg?.[0]?.url || "")
-        : "";
-
+        ? (photos[0]?.url || photos[0]?.src || photos[0]?.mixedSources?.jpeg?.[0]?.url || "") : "";
       setForm(f => ({
-        ...f,
-        address: fullAddress,
-        price: p.price || f.price,
-        beds: p.bedrooms || f.beds,
-        baths: p.bathrooms || f.baths,
-        sqft,
-        yearBuilt: p.yearBuilt || f.yearBuilt,
-        lotSize,
-        hoaFees,
-        taxes,
-        status,
-        url: fetchUrl,
-        source: "Zillow",
-        imageUrl: firstPhoto || f.imageUrl,
+        ...f, address: fullAddress, price: p.price || f.price,
+        beds: p.bedrooms || f.beds, baths: p.bathrooms || f.baths,
+        sqft, yearBuilt: p.yearBuilt || f.yearBuilt, lotSize, hoaFees, taxes, status,
+        url: fetchUrl, source: "Zillow", imageUrl: firstPhoto || f.imageUrl,
         notes: p.description ? p.description.slice(0, 300) + "..." : "",
       }));
       setFetchStatus("success");
@@ -707,13 +901,12 @@ export default function NestTrack() {
     }
   };
 
-  const addListing = () => {
+  const addListing = async () => {
     if (!form.address || !form.price) return;
     const now = new Date().toISOString().split("T")[0];
     const p = Number(String(form.price).replace(/[^0-9.]/g, ""));
     const newL = {
-      ...DEF_FORM, ...form,
-      id: Date.now(), price: p,
+      ...DEF_FORM, ...form, id: Date.now(), price: p,
       beds: Number(form.beds) || 0, baths: Number(form.baths) || 0,
       sqft: Number(form.sqft) || 0, yearBuilt: Number(form.yearBuilt) || 0,
       favorited: false, pros: [], cons: [],
@@ -721,13 +914,15 @@ export default function NestTrack() {
       priceHistory: [{ date: now, price: p, note: "Listed" }],
     };
     setListings(ls => [newL, ...ls]);
+    if (roomId) await syncListing(newL);
     setForm(DEF_FORM); setFetchUrl(""); setFetchStatus(null); setShowAdd(false);
   };
 
-  const deleteListing = id => {
+  const deleteListing = async (id) => {
     setListings(ls => ls.filter(l => l.id !== id));
     if (selectedId === id) setSelectedId(null);
     setCompareIds(c => c.filter(i => i !== id));
+    if (roomId) await supabase.from("listings").delete().eq("id", id).eq("room_id", roomId);
   };
 
   const addPro = (id) => {
@@ -747,6 +942,7 @@ export default function NestTrack() {
   const removePro = (id, i) => { const l = listings.find(x => x.id === id); upd(id, { pros: l.pros.filter((_, idx) => idx !== i) }); };
   const removeCon = (id, i) => { const l = listings.find(x => x.id === id); upd(id, { cons: l.cons.filter((_, idx) => idx !== i) }); };
   const setRating = (id, key, v) => { const l = listings.find(x => x.id === id); upd(id, { ratings: { ...l.ratings, [key]: v } }); };
+
   const addPriceEntry = (id) => {
     const p = Number(String(priceAddForm.price).replace(/[^0-9.]/g, ""));
     if (!p) return;
@@ -767,10 +963,8 @@ export default function NestTrack() {
   };
 
   const copyShareLink = (listing) => {
-    const link = generateShareLink(listing);
-    navigator.clipboard.writeText(link).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+    navigator.clipboard.writeText(generateShareLink(listing)).then(() => {
+      setCopied(true); setTimeout(() => setCopied(false), 2500);
     });
   };
 
@@ -790,9 +984,17 @@ export default function NestTrack() {
     </div>
   );
 
+  const fmt = n => n ? `$${Number(n).toLocaleString()}` : "—";
+  const fmtDate = d => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const priceDiff = (history) => {
+    if (!history || history.length < 2) return null;
+    const sorted = [...history].sort((a, b) => new Date(a.date) - new Date(b.date));
+    return sorted[sorted.length - 1].price - sorted[0].price;
+  };
+
   return (
     <div>
-      <style>{FONTS}{CSS}</style>
+      <style>{FONTS}{CSS}{ROOM_CSS}</style>
 
       {/* HEADER */}
       <header className="header">
@@ -810,11 +1012,34 @@ export default function NestTrack() {
           <button className={`nav-btn${tab === "compare" ? " active" : ""}`} onClick={() => setTab("compare")}>
             ⚖ Compare <span className="nav-badge">{compareIds.length}</span>
           </button>
+          <button className={`nav-btn${roomId ? " active" : ""}`} onClick={() => setShowRoomModal(true)}>
+            {roomId ? "🔗 Linked" : "🔗 Link Room"}
+            {syncStatus === "syncing" && <span className="room-sync-indicator syncing">syncing</span>}
+            {syncStatus === "synced" && roomId && <span className="room-sync-indicator synced">live</span>}
+          </button>
         </nav>
       </header>
 
-      <main className="main">
+      {/* ROOM BAR — shown when in a room */}
+      {roomId && (
+        <div className="room-bar">
+          <div className="room-badge">
+            <div className="room-badge-dot" />
+            <span className="room-members">Room</span>
+            <span className="room-code">{roomId}</span>
+          </div>
+          <span style={{fontSize:12,color:"var(--text2)"}}>Share this code with your partner to collaborate in real-time</span>
+          <div className="room-actions">
+            <button className="btn btn-ghost btn-sm" onClick={() => {
+              navigator.clipboard.writeText(roomId);
+              setRoomCopied(true); setTimeout(() => setRoomCopied(false), 2000);
+            }}>{roomCopied ? "✓ Copied" : "Copy Code"}</button>
+            <button className="btn btn-danger btn-sm" onClick={leaveRoom}>Leave Room</button>
+          </div>
+        </div>
+      )}
 
+      <main className="main">
         {/* ── ALL / FAVORITES ── */}
         {(tab === "all" || tab === "favorites") && (<>
           <div className="page-head">
@@ -829,13 +1054,10 @@ export default function NestTrack() {
           {tab === "all" && showAdd && (
             <div className="add-panel">
               <div className="add-panel-header" onClick={() => setShowAdd(v => !v)}>
-                <div className="add-panel-title">
-                  <span style={{color:"var(--teal)"}}>+</span> New Listing
-                </div>
+                <div className="add-panel-title"><span style={{color:"var(--teal)"}}>+</span> New Listing</div>
                 <span className={`panel-caret${showAdd ? " open" : ""}`}>▼</span>
               </div>
               <div className="add-panel-body">
-                {/* URL FETCH */}
                 <div className="fetch-row">
                   <input className="fetch-input" placeholder="Paste a Zillow / Redfin / Realtor URL to auto-fill…"
                     value={fetchUrl} onChange={e => setFetchUrl(e.target.value)}
@@ -856,69 +1078,21 @@ export default function NestTrack() {
                   <span className="fetch-divider-text">or fill manually</span>
                   <div className="fetch-divider-line" />
                 </div>
-                {/* FORM */}
                 <div className="form-grid">
-                  <div className="form-group fg-half">
-                    <label className="form-label">Address *</label>
-                    <input className="form-input" placeholder="123 Main St, City, State ZIP"
-                      value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Price *</label>
-                    <input className="form-input" placeholder="$450,000"
-                      value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Status</label>
-                    <select className="form-input" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
-                      {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Beds</label>
-                    <input className="form-input" placeholder="3" type="number" value={form.beds} onChange={e => setForm(f => ({ ...f, beds: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Baths</label>
-                    <input className="form-input" placeholder="2" type="number" step="0.5" value={form.baths} onChange={e => setForm(f => ({ ...f, baths: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Sq Ft</label>
-                    <input className="form-input" placeholder="1,800" value={form.sqft} onChange={e => setForm(f => ({ ...f, sqft: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Year Built</label>
-                    <input className="form-input" placeholder="2001" value={form.yearBuilt} onChange={e => setForm(f => ({ ...f, yearBuilt: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">HOA Fees</label>
-                    <input className="form-input" placeholder="None / $120/mo" value={form.hoaFees} onChange={e => setForm(f => ({ ...f, hoaFees: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Property Taxes</label>
-                    <input className="form-input" placeholder="$8,000/yr" value={form.taxes} onChange={e => setForm(f => ({ ...f, taxes: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Lot Size</label>
-                    <input className="form-input" placeholder="0.2 ac" value={form.lotSize} onChange={e => setForm(f => ({ ...f, lotSize: e.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Source</label>
-                    <input className="form-input" placeholder="Zillow, Redfin…" value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} />
-                  </div>
-                  <div className="form-group fg-half">
-                    <label className="form-label">Listing URL</label>
-                    <input className="form-input" placeholder="https://…" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} />
-                  </div>
-                  <div className="form-group fg-half">
-                    <label className="form-label">Image URL (optional)</label>
-                    <input className="form-input" placeholder="https://…" value={form.imageUrl} onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))} />
-                  </div>
-                  <div className="form-group fg-full">
-                    <label className="form-label">Initial Notes</label>
-                    <textarea className="form-input" rows={2} placeholder="First impressions, things to follow up on…"
-                      value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
-                  </div>
+                  <div className="form-group fg-half"><label className="form-label">Address *</label><input className="form-input" placeholder="123 Main St, City, State ZIP" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">Price *</label><input className="form-input" placeholder="$450,000" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">Status</label><select className="form-input" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>{STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}</select></div>
+                  <div className="form-group"><label className="form-label">Beds</label><input className="form-input" placeholder="3" type="number" value={form.beds} onChange={e => setForm(f => ({ ...f, beds: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">Baths</label><input className="form-input" placeholder="2" type="number" step="0.5" value={form.baths} onChange={e => setForm(f => ({ ...f, baths: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">Sq Ft</label><input className="form-input" placeholder="1,800" value={form.sqft} onChange={e => setForm(f => ({ ...f, sqft: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">Year Built</label><input className="form-input" placeholder="2001" value={form.yearBuilt} onChange={e => setForm(f => ({ ...f, yearBuilt: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">HOA Fees</label><input className="form-input" placeholder="None / $120/mo" value={form.hoaFees} onChange={e => setForm(f => ({ ...f, hoaFees: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">Property Taxes</label><input className="form-input" placeholder="$8,000/yr" value={form.taxes} onChange={e => setForm(f => ({ ...f, taxes: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">Lot Size</label><input className="form-input" placeholder="0.2 ac" value={form.lotSize} onChange={e => setForm(f => ({ ...f, lotSize: e.target.value }))} /></div>
+                  <div className="form-group"><label className="form-label">Source</label><input className="form-input" placeholder="Zillow, Redfin…" value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} /></div>
+                  <div className="form-group fg-half"><label className="form-label">Listing URL</label><input className="form-input" placeholder="https://…" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} /></div>
+                  <div className="form-group fg-half"><label className="form-label">Image URL (optional)</label><input className="form-input" placeholder="https://…" value={form.imageUrl} onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))} /></div>
+                  <div className="form-group fg-full"><label className="form-label">Initial Notes</label><textarea className="form-input" rows={2} placeholder="First impressions…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
                 </div>
                 <div className="form-actions">
                   <button className="btn btn-primary" onClick={addListing}>Add Listing</button>
@@ -928,7 +1102,6 @@ export default function NestTrack() {
             </div>
           )}
 
-          {/* FILTER BAR */}
           {tab === "all" && (
             <div className="filter-bar">
               {["All", ...STATUS_OPTIONS].map(s => (
@@ -939,7 +1112,6 @@ export default function NestTrack() {
             </div>
           )}
 
-          {/* GRID */}
           {shown.length === 0 ? (
             <div className="empty">
               <div className="empty-icon">{tab === "favorites" ? "⭐" : "🏠"}</div>
@@ -951,8 +1123,7 @@ export default function NestTrack() {
               {shown.map(l => {
                 const diff = priceDiff(l.priceHistory);
                 return (
-                  <div key={l.id} className={`card${l.favorited ? " favorited" : ""}${compareIds.includes(l.id) ? " in-compare" : ""}`}
-                    onClick={() => setSelectedId(l.id)}>
+                  <div key={l.id} className={`card${l.favorited ? " favorited" : ""}${compareIds.includes(l.id) ? " in-compare" : ""}`} onClick={() => setSelectedId(l.id)}>
                     <div className="card-img">
                       {l.imageUrl ? <img src={l.imageUrl} alt="" onError={e => e.target.style.display="none"} /> : <div className="card-img-placeholder">⌂</div>}
                       <div className="card-img-overlay" />
@@ -961,25 +1132,18 @@ export default function NestTrack() {
                         {l.source && <span className="source-badge">{l.source}</span>}
                       </div>
                       <div className="card-img-actions" onClick={e => e.stopPropagation()}>
-                        <div className={`icon-btn${l.favorited ? " active" : ""}`} title="Favorite"
-                          onClick={() => upd(l.id, { favorited: !l.favorited })}>
+                        <div className={`icon-btn${l.favorited ? " active" : ""}`} onClick={() => upd(l.id, { favorited: !l.favorited })}>
                           {l.favorited ? "⭐" : "☆"}
                         </div>
-                        <div className={`icon-btn${compareIds.includes(l.id) ? " active" : ""}`} title="Add to compare"
+                        <div className={`icon-btn${compareIds.includes(l.id) ? " active" : ""}`}
                           style={compareIds.includes(l.id) ? { background: "var(--teal-dim)", borderColor: "rgba(62,207,178,0.4)" } : {}}
-                          onClick={() => setCompareIds(c => c.includes(l.id) ? c.filter(i => i !== l.id) : [...c, l.id])}>
-                          ⚖
-                        </div>
+                          onClick={() => setCompareIds(c => c.includes(l.id) ? c.filter(i => i !== l.id) : [...c, l.id])}>⚖</div>
                       </div>
                     </div>
                     <div className="card-body">
                       <div className="card-price-row">
                         <div className="card-price">{fmt(l.price)}</div>
-                        {diff !== null && (
-                          <span className={`price-delta ${diff < 0 ? "down" : "up"}`}>
-                            {diff < 0 ? "▼" : "▲"} {fmt(Math.abs(diff))}
-                          </span>
-                        )}
+                        {diff !== null && <span className={`price-delta ${diff < 0 ? "down" : "up"}`}>{diff < 0 ? "▼" : "▲"} {fmt(Math.abs(diff))}</span>}
                       </div>
                       <div className="card-address">{l.address}</div>
                       <div className="card-specs">
@@ -991,8 +1155,8 @@ export default function NestTrack() {
                       {l.ratings?.overall > 0 && (
                         <div className="card-score-row">
                           <div className="score-pills">
-                            {[["overall","★"],["location","📍"],["value","💲"],["condition","🔧"]].map(([key, icon]) => (
-                              l.ratings[key] > 0 && <span key={key} className="score-pill rated" title={key}>{icon} {l.ratings[key]}</span>
+                            {[["overall","★"],["location","📍"],["value","💲"],["condition","🔧"]].map(([key,icon]) => (
+                              l.ratings[key] > 0 && <span key={key} className="score-pill rated">{icon} {l.ratings[key]}</span>
                             ))}
                           </div>
                         </div>
@@ -1001,9 +1165,7 @@ export default function NestTrack() {
                         <div className="pc-tags">
                           {l.pros?.slice(0,2).map((p,i) => <span key={i} className="tag pro">✓ {p}</span>)}
                           {l.cons?.slice(0,2).map((c,i) => <span key={i} className="tag con">✗ {c}</span>)}
-                          {(l.pros?.length + l.cons?.length) > 4 && (
-                            <span className="tag more">+{l.pros.length + l.cons.length - 4}</span>
-                          )}
+                          {(l.pros?.length + l.cons?.length) > 4 && <span className="tag more">+{l.pros.length + l.cons.length - 4}</span>}
                         </div>
                       )}
                     </div>
@@ -1022,10 +1184,7 @@ export default function NestTrack() {
         {/* ── COMPARE ── */}
         {tab === "compare" && (<>
           <div className="page-head">
-            <div>
-              <div className="page-title">Side-by-Side Compare</div>
-              <div className="page-sub">Select homes below to compare key details at a glance.</div>
-            </div>
+            <div><div className="page-title">Side-by-Side Compare</div><div className="page-sub">Select homes below to compare key details at a glance.</div></div>
           </div>
           <div className="compare-select">
             <span className="compare-section-label">Select:</span>
@@ -1037,67 +1196,42 @@ export default function NestTrack() {
             ))}
           </div>
           {compareLs.length < 2 ? (
-            <div className="empty">
-              <div className="empty-icon">⚖</div>
-              <div className="empty-title">Select 2 or more listings</div>
-              <div className="empty-sub">Use the chips above to pick which homes to compare.</div>
-            </div>
+            <div className="empty"><div className="empty-icon">⚖</div><div className="empty-title">Select 2 or more listings</div><div className="empty-sub">Use the chips above to pick which homes to compare.</div></div>
           ) : (
             <div className="compare-wrap">
               <table className="compare-table">
-                <thead>
-                  <tr>
-                    <th>Detail</th>
-                    {compareLs.map(l => <th key={l.id}>{l.address.split(",")[0]}</th>)}
-                  </tr>
-                </thead>
+                <thead><tr><th>Detail</th>{compareLs.map(l => <th key={l.id}>{l.address.split(",")[0]}</th>)}</tr></thead>
                 <tbody>
-                  {(() => {
-                    const rows = [
-                      ["Price", l => fmt(l.price), true],
-                      ["Status", l => l.status],
-                      ["Beds / Baths", l => `${l.beds||"—"} bd / ${l.baths||"—"} ba`],
-                      ["Sq Ft", l => l.sqft ? `${Number(l.sqft).toLocaleString()}` : "—", true],
-                      ["Year Built", l => l.yearBuilt || "—", true],
-                      ["Lot Size", l => l.lotSize || "—"],
-                      ["HOA Fees", l => l.hoaFees || "—"],
-                      ["Property Taxes", l => l.taxes || "—"],
-                      ["Overall ★", l => l.ratings?.overall ? "★".repeat(l.ratings.overall) : "—", true],
-                      ["Location ★", l => l.ratings?.location ? "★".repeat(l.ratings.location) : "—", true],
-                      ["Value ★", l => l.ratings?.value ? "★".repeat(l.ratings.value) : "—", true],
-                      ["Condition ★", l => l.ratings?.condition ? "★".repeat(l.ratings.condition) : "—", true],
-                      ["Pros", l => l.pros?.join(" · ") || "—"],
-                      ["Cons", l => l.cons?.join(" · ") || "—"],
-                      ["Price History", l => l.priceHistory?.length > 1 ? `${l.priceHistory.length} entries` : "—"],
-                      ["Source", l => l.source || "—"],
-                      ["Notes", l => l.notes ? l.notes.slice(0, 80) + (l.notes.length > 80 ? "…" : "") : "—"],
-                    ];
-                    return rows.map(([label, fn, compare]) => {
-                      const vals = compareLs.map(l => fn(l));
-                      let bestIdx = -1;
-                      if (compare && label === "Price") {
-                        const nums = compareLs.map(l => l.price || Infinity);
-                        bestIdx = nums.indexOf(Math.min(...nums));
-                      } else if (compare && label.includes("★")) {
-                        const nums = compareLs.map(l => {
-                          const key = label.split(" ")[0].toLowerCase();
-                          return l.ratings?.[key] || 0;
-                        });
-                        bestIdx = nums.indexOf(Math.max(...nums));
-                      } else if (compare && label === "Sq Ft") {
-                        const nums = compareLs.map(l => l.sqft || 0);
-                        bestIdx = nums.indexOf(Math.max(...nums));
-                      }
-                      return (
-                        <tr key={label}>
-                          <td>{label}</td>
-                          {compareLs.map((l, i) => (
-                            <td key={l.id} className={i === bestIdx ? "compare-best" : ""}>{vals[i]}</td>
-                          ))}
-                        </tr>
-                      );
-                    });
-                  })()}
+                  {[
+                    ["Price", l => fmt(l.price), "price"],
+                    ["Status", l => l.status],
+                    ["Beds / Baths", l => `${l.beds||"—"} bd / ${l.baths||"—"} ba`],
+                    ["Sq Ft", l => l.sqft ? `${Number(l.sqft).toLocaleString()}` : "—", "sqft"],
+                    ["Year Built", l => l.yearBuilt || "—", "yearBuilt"],
+                    ["Lot Size", l => l.lotSize || "—"],
+                    ["HOA Fees", l => l.hoaFees || "—"],
+                    ["Property Taxes", l => l.taxes || "—"],
+                    ["Overall ★", l => l.ratings?.overall ? "★".repeat(l.ratings.overall) : "—", "overall"],
+                    ["Location ★", l => l.ratings?.location ? "★".repeat(l.ratings.location) : "—", "location"],
+                    ["Value ★", l => l.ratings?.value ? "★".repeat(l.ratings.value) : "—", "value"],
+                    ["Condition ★", l => l.ratings?.condition ? "★".repeat(l.ratings.condition) : "—", "condition"],
+                    ["Pros", l => l.pros?.join(" · ") || "—"],
+                    ["Cons", l => l.cons?.join(" · ") || "—"],
+                    ["Source", l => l.source || "—"],
+                    ["Notes", l => l.notes ? l.notes.slice(0,80)+"…" : "—"],
+                  ].map(([label, fn, cmp]) => {
+                    let bestIdx = -1;
+                    if (cmp === "price") { const ns = compareLs.map(l => l.price||Infinity); bestIdx = ns.indexOf(Math.min(...ns)); }
+                    else if (cmp === "sqft") { const ns = compareLs.map(l => l.sqft||0); bestIdx = ns.indexOf(Math.max(...ns)); }
+                    else if (cmp === "yearBuilt") { const ns = compareLs.map(l => l.yearBuilt||0); bestIdx = ns.indexOf(Math.max(...ns)); }
+                    else if (["overall","location","value","condition"].includes(cmp)) { const ns = compareLs.map(l => l.ratings?.[cmp]||0); bestIdx = ns.indexOf(Math.max(...ns)); }
+                    return (
+                      <tr key={label}>
+                        <td>{label}</td>
+                        {compareLs.map((l,i) => <td key={l.id} className={i===bestIdx?"compare-best":""}>{fn(l)}</td>)}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1109,21 +1243,16 @@ export default function NestTrack() {
       {selectedId && selected && (
         <div className="overlay" onClick={() => setSelectedId(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            {/* HERO */}
             <div className="modal-hero">
               {selected.imageUrl
                 ? <img src={selected.imageUrl} alt="" onError={e => e.target.style.display="none"} />
-                : <div style={{ width:"100%", height:"100%", background:"linear-gradient(135deg,#1a1e26,#13161b)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:64, opacity:0.15, fontFamily:"Syne" }}>⌂</div>
-              }
+                : <div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#1a1e26,#13161b)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:64,opacity:0.15,fontFamily:"Syne"}}>⌂</div>}
               <div className="modal-hero-overlay" />
-              <div className="modal-hero-content">
-                <div className="modal-price">{fmt(selected.price)}</div>
-              </div>
+              <div className="modal-hero-content"><div className="modal-price">{fmt(selected.price)}</div></div>
               <button className="modal-close-btn" onClick={() => setSelectedId(null)}>✕</button>
             </div>
-
             <div className="modal-body">
-              <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:12 }}>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
                 <div>
                   <div className="modal-address">{selected.address}</div>
                   <div style={{display:"flex",gap:6,marginTop:8}}>
@@ -1132,137 +1261,173 @@ export default function NestTrack() {
                   </div>
                 </div>
                 <div style={{display:"flex",gap:7,flexShrink:0}}>
-                  <div className={`icon-btn${selected.favorited ? " active" : ""}`} style={{width:36,height:36,fontSize:16}}
-                    onClick={() => upd(selected.id, { favorited: !selected.favorited })}>
-                    {selected.favorited ? "⭐" : "☆"}
-                  </div>
-                  <div className={`icon-btn${compareIds.includes(selected.id) ? " active" : ""}`}
-                    style={compareIds.includes(selected.id) ? {width:36,height:36,fontSize:16,background:"var(--teal-dim)",borderColor:"rgba(62,207,178,0.4)"} : {width:36,height:36,fontSize:16}}
-                    onClick={() => setCompareIds(c => c.includes(selected.id) ? c.filter(i => i !== selected.id) : [...c, selected.id])}>
-                    ⚖
-                  </div>
+                  <div className={`icon-btn${selected.favorited?" active":""}`} style={{width:36,height:36,fontSize:16}} onClick={() => upd(selected.id,{favorited:!selected.favorited})}>{selected.favorited?"⭐":"☆"}</div>
+                  <div className={`icon-btn${compareIds.includes(selected.id)?" active":""}`}
+                    style={compareIds.includes(selected.id)?{width:36,height:36,fontSize:16,background:"var(--teal-dim)",borderColor:"rgba(62,207,178,0.4)"}:{width:36,height:36,fontSize:16}}
+                    onClick={() => setCompareIds(c => c.includes(selected.id)?c.filter(i=>i!==selected.id):[...c,selected.id])}>⚖</div>
                 </div>
               </div>
-
-              {/* SPECS */}
               <div className="modal-meta">
-                {selected.beds > 0 && <span className="modal-spec">🛏 {selected.beds} beds</span>}
-                {selected.baths > 0 && <span className="modal-spec">🚿 {selected.baths} baths</span>}
-                {selected.sqft > 0 && <span className="modal-spec">◻ {Number(selected.sqft).toLocaleString()} sqft</span>}
-                {selected.yearBuilt > 0 && <span className="modal-spec">🗓 {selected.yearBuilt}</span>}
-                {selected.lotSize && <span className="modal-spec">🌿 {selected.lotSize}</span>}
-                {selected.hoaFees && <span className="modal-spec">🏘 HOA: {selected.hoaFees}</span>}
-                {selected.taxes && <span className="modal-spec">💰 {selected.taxes}/yr taxes</span>}
-                {selected.url && <a href={selected.url} target="_blank" rel="noopener" className="modal-link">↗ View on {selected.source || "site"}</a>}
+                {selected.beds>0&&<span className="modal-spec">🛏 {selected.beds} beds</span>}
+                {selected.baths>0&&<span className="modal-spec">🚿 {selected.baths} baths</span>}
+                {selected.sqft>0&&<span className="modal-spec">◻ {Number(selected.sqft).toLocaleString()} sqft</span>}
+                {selected.yearBuilt>0&&<span className="modal-spec">🗓 {selected.yearBuilt}</span>}
+                {selected.lotSize&&<span className="modal-spec">🌿 {selected.lotSize}</span>}
+                {selected.hoaFees&&<span className="modal-spec">🏘 HOA: {selected.hoaFees}</span>}
+                {selected.taxes&&<span className="modal-spec">💰 {selected.taxes}</span>}
+                {selected.url&&<a href={selected.url} target="_blank" rel="noopener" className="modal-link">↗ View on {selected.source||"site"}</a>}
               </div>
-
-              {/* RATINGS */}
               <div className="section-head">Ratings</div>
               <div className="ratings-grid">
                 {[["overall","Overall"],["location","Location"],["value","Value"],["condition","Condition"]].map(([key,label]) => (
                   <div key={key} className="rating-row">
                     <span className="rating-label">{label}</span>
-                    <Stars id={selected.id} rkey={key} val={selected.ratings?.[key] || 0} />
+                    <Stars id={selected.id} rkey={key} val={selected.ratings?.[key]||0} />
                   </div>
                 ))}
               </div>
-
-              {/* PROS & CONS */}
               <div className="section-head">Pros & Cons</div>
               <div className="pc-grid">
                 <div className="pc-col pros">
-                  <div className="pc-col-head pros">✅ Pros ({selected.pros?.length || 0})</div>
-                  {selected.pros?.map((p, i) => (
+                  <div className="pc-col-head pros">✅ Pros ({selected.pros?.length||0})</div>
+                  {selected.pros?.map((p,i) => (
                     <div key={i} className="pc-item">
                       <span className="pc-icon" style={{color:"var(--green)"}}>✓</span>
                       <span style={{flex:1}}>{p}</span>
-                      <button className="pc-del" onClick={() => removePro(selected.id, i)}>✕</button>
+                      <button className="pc-del" onClick={() => removePro(selected.id,i)}>✕</button>
                     </div>
                   ))}
                   <div className="pc-add">
-                    <input className="pc-add-input" ref={el => proRefs.current[selected.id] = el}
-                      placeholder="Add a pro…"
-                      onKeyDown={e => e.key === "Enter" && addPro(selected.id)} />
+                    <input className="pc-add-input" ref={el => proRefs.current[selected.id]=el} placeholder="Add a pro…" onKeyDown={e => e.key==="Enter"&&addPro(selected.id)} />
                     <button className="btn-add-pro" onClick={() => addPro(selected.id)}>+</button>
                   </div>
                 </div>
                 <div className="pc-col cons">
-                  <div className="pc-col-head cons">❌ Cons ({selected.cons?.length || 0})</div>
-                  {selected.cons?.map((c, i) => (
+                  <div className="pc-col-head cons">❌ Cons ({selected.cons?.length||0})</div>
+                  {selected.cons?.map((c,i) => (
                     <div key={i} className="pc-item">
                       <span className="pc-icon" style={{color:"var(--red)"}}>✗</span>
                       <span style={{flex:1}}>{c}</span>
-                      <button className="pc-del" onClick={() => removeCon(selected.id, i)}>✕</button>
+                      <button className="pc-del" onClick={() => removeCon(selected.id,i)}>✕</button>
                     </div>
                   ))}
                   <div className="pc-add">
-                    <input className="pc-add-input" ref={el => conRefs.current[selected.id] = el}
-                      placeholder="Add a con…"
-                      onKeyDown={e => e.key === "Enter" && addCon(selected.id)} />
+                    <input className="pc-add-input" ref={el => conRefs.current[selected.id]=el} placeholder="Add a con…" onKeyDown={e => e.key==="Enter"&&addCon(selected.id)} />
                     <button className="btn-add-con" onClick={() => addCon(selected.id)}>+</button>
                   </div>
                 </div>
               </div>
-
-              {/* NOTES */}
               <div className="section-head">Notes</div>
-              <textarea className="notes-ta"
-                placeholder="Anything you want to remember — impressions, follow-up questions, things the agent said…"
-                value={selected.notes || ""}
-                onChange={e => upd(selected.id, { notes: e.target.value })} />
-
-              {/* PRICE HISTORY */}
+              <textarea className="notes-ta" placeholder="Anything you want to remember…"
+                value={selected.notes||""} onChange={e => upd(selected.id,{notes:e.target.value})} />
               <div className="section-head">Price History</div>
               <div className="price-history">
-                {[...(selected.priceHistory || [])].sort((a,b) => new Date(b.date)-new Date(a.date)).map((entry, i, arr) => {
+                {[...(selected.priceHistory||[])].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((entry,i,arr) => {
                   const prev = arr[i+1];
                   const delta = prev ? entry.price - prev.price : null;
                   return (
                     <div key={i} className="price-entry">
                       <span className="price-entry-date">{fmtDate(entry.date)}</span>
                       <span className="price-entry-val">{fmt(entry.price)}</span>
-                      {delta !== null && (
-                        <span className={`price-entry-delta ${delta < 0 ? "down" : "up"}`} style={{background: delta < 0 ? "var(--green-dim)" : "var(--red-dim)", color: delta < 0 ? "var(--green)" : "var(--red)"}}>
-                          {delta < 0 ? "▼" : "▲"} {fmt(Math.abs(delta))}
-                        </span>
-                      )}
+                      {delta!==null&&<span className="price-entry-delta" style={{background:delta<0?"var(--green-dim)":"var(--red-dim)",color:delta<0?"var(--green)":"var(--red)"}}>{delta<0?"▼":"▲"} {fmt(Math.abs(delta))}</span>}
                       <span className="price-entry-note">{entry.note}</span>
                     </div>
                   );
                 })}
               </div>
               <div className="price-add-row" style={{marginTop:10}}>
-                <input className="form-input" style={{flex:1,minWidth:120}} placeholder="New price (e.g. 479000)"
-                  value={priceAddForm.price} onChange={e => setPriceAddForm(f => ({...f, price: e.target.value}))} />
-                <input className="form-input" style={{flex:2,minWidth:160}} placeholder="Note (e.g. Price reduced)"
-                  value={priceAddForm.note} onChange={e => setPriceAddForm(f => ({...f, note: e.target.value}))} />
+                <input className="form-input" style={{flex:1,minWidth:120}} placeholder="New price" value={priceAddForm.price} onChange={e => setPriceAddForm(f=>({...f,price:e.target.value}))} />
+                <input className="form-input" style={{flex:2,minWidth:160}} placeholder="Note (e.g. Price reduced)" value={priceAddForm.note} onChange={e => setPriceAddForm(f=>({...f,note:e.target.value}))} />
                 <button className="btn btn-secondary btn-sm" onClick={() => addPriceEntry(selected.id)}>+ Log Price</button>
               </div>
-
-              {/* SHARE */}
               <div className="section-head">Share with Partner</div>
               <div className="share-panel">
                 <div className="share-title">Share this listing</div>
-                <div className="share-sub">Generate a link with this listing's details, ratings, and notes — send it to a co-buyer or partner to review together.</div>
+                <div className="share-sub">Copy a link with this listing's full details to send to a co-buyer.</div>
                 <div className="share-link-row">
                   <input className="share-link-input" readOnly value={generateShareLink(selected)} />
-                  <button className="btn btn-primary btn-sm" onClick={() => copyShareLink(selected)}>
-                    {copied ? "✓ Copied!" : "Copy Link"}
-                  </button>
-                  {copied && <span className="copied-badge">✓ Copied</span>}
+                  <button className="btn btn-primary btn-sm" onClick={() => copyShareLink(selected)}>{copied?"✓ Copied!":"Copy Link"}</button>
                 </div>
-                <div className="share-notice">⚠ Note: Data is encoded in the URL and not stored on any server. The recipient will see a read-only snapshot.</div>
+                {roomId && <div style={{marginTop:10,fontSize:12,color:"var(--teal)"}}>🔗 You're in room <strong>{roomId}</strong> — your partner sees all changes live.</div>}
+                <div className="share-notice">⚠ Data is encoded in the URL, not stored on a server.</div>
               </div>
-
-              {/* MODAL FOOTER */}
               <div className="modal-footer">
-                <button className="btn btn-secondary btn-sm" onClick={() => { setCompareIds(c => c.includes(selected.id) ? c.filter(i => i !== selected.id) : [...c, selected.id]); }}>
-                  {compareIds.includes(selected.id) ? "✓ In Compare" : "+ Compare"}
+                <button className="btn btn-secondary btn-sm" onClick={() => setCompareIds(c=>c.includes(selected.id)?c.filter(i=>i!==selected.id):[...c,selected.id])}>
+                  {compareIds.includes(selected.id)?"✓ In Compare":"+ Compare"}
                 </button>
                 <button className="btn btn-danger btn-sm" onClick={() => deleteListing(selected.id)}>🗑 Delete</button>
                 <button className="btn btn-ghost btn-sm" style={{marginLeft:"auto"}} onClick={() => setSelectedId(null)}>Close</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ROOM MODAL ── */}
+      {showRoomModal && (
+        <div className="room-modal-overlay" onClick={() => { setShowRoomModal(false); setRoomStep("choose"); setJoinCode(""); setJoinError(""); }}>
+          <div className="room-modal" onClick={e => e.stopPropagation()}>
+
+            {/* ALREADY IN A ROOM */}
+            {roomId && roomStep !== "created" && (
+              <>
+                <div className="room-modal-title">🔗 Linked Room</div>
+                <div className="room-modal-sub">You're currently linked in a room with your partner. All changes sync in real-time.</div>
+                <div className="room-created-code">
+                  <div className="room-created-label">Room Code</div>
+                  <div className="room-created-value">{roomId}</div>
+                  <div className="room-created-hint">Share this code with anyone you want to collaborate with</div>
+                </div>
+                <div style={{display:"flex",gap:8,marginTop:16}}>
+                  <button className="btn btn-primary" style={{flex:1}} onClick={() => { navigator.clipboard.writeText(roomId); setRoomCopied(true); setTimeout(()=>setRoomCopied(false),2000); }}>{roomCopied?"✓ Copied!":"Copy Room Code"}</button>
+                  <button className="btn btn-danger" onClick={() => { leaveRoom(); setShowRoomModal(false); }}>Leave Room</button>
+                </div>
+                <button className="btn btn-ghost" style={{width:"100%",marginTop:8}} onClick={() => setShowRoomModal(false)}>Close</button>
+              </>
+            )}
+
+            {/* CHOOSE — not in a room */}
+            {!roomId && roomStep === "choose" && (
+              <>
+                <div className="room-modal-title">🔗 Link a Room</div>
+                <div className="room-modal-sub">Collaborate with a partner in real-time. Both of you can add listings, pros/cons, notes, and ratings — all synced live.</div>
+                <div className="room-option" onClick={createRoom}>
+                  <div className="room-option-title">✨ Create a New Room</div>
+                  <div className="room-option-sub">Start a new shared room and get a code to send your partner</div>
+                </div>
+                <div className="room-divider"><div className="room-divider-line"/><span className="room-divider-text">or</span><div className="room-divider-line"/></div>
+                <div style={{fontSize:13,color:"var(--text1)",marginBottom:8,fontWeight:600}}>Join an Existing Room</div>
+                <input className="room-join-input" placeholder="Enter room code e.g. MAPLE-7842"
+                  value={joinCode} onChange={e => { setJoinCode(e.target.value); setJoinError(""); }}
+                  onKeyDown={e => e.key==="Enter"&&joinRoom()} />
+                {joinError && <div className="room-error">{joinError}</div>}
+                <button className="btn btn-primary" style={{width:"100%",marginTop:8}} onClick={joinRoom}>Join Room</button>
+                <button className="btn btn-ghost" style={{width:"100%",marginTop:8}} onClick={() => setShowRoomModal(false)}>Cancel</button>
+              </>
+            )}
+
+            {/* CREATING */}
+            {roomStep === "creating" && (
+              <>
+                <div className="room-modal-title">Creating Room…</div>
+                <div style={{textAlign:"center",padding:"32px 0",color:"var(--text2)",fontFamily:"Fira Code, monospace",fontSize:13}}>Setting up your room…</div>
+              </>
+            )}
+
+            {/* CREATED */}
+            {roomStep === "created" && (
+              <>
+                <div className="room-modal-title">🎉 Room Created!</div>
+                <div className="room-modal-sub">Share this code with your partner. Once they join, all your listings will sync in real-time.</div>
+                <div className="room-created-code">
+                  <div className="room-created-label">Your Room Code</div>
+                  <div className="room-created-value">{newRoomCode}</div>
+                  <div className="room-created-hint">Your partner enters this code to join</div>
+                </div>
+                <button className="btn btn-primary" style={{width:"100%",marginTop:8}} onClick={() => { navigator.clipboard.writeText(newRoomCode); setRoomCopied(true); setTimeout(()=>setRoomCopied(false),2000); }}>{roomCopied?"✓ Copied!":"Copy Room Code"}</button>
+                <button className="btn btn-ghost" style={{width:"100%",marginTop:8}} onClick={() => { setShowRoomModal(false); setRoomStep("choose"); }}>Done</button>
+              </>
+            )}
           </div>
         </div>
       )}
