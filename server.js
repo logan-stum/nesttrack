@@ -44,4 +44,5 @@ app.get("/api/fetch-photos", async (req, res) => {
   }
 });
 
-app.listen(3001, () => console.log("Proxy running on http://localhost:3001"));
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
