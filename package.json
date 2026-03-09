@@ -1,0 +1,49 @@
+{
+  "name": "nesttrack",
+  "version": "0.1.0",
+  "private": false,
+  "description": "A dark-mode housing listing tracker with pros/cons, price history, and side-by-side comparison",
+  "author": "Your Name <you@example.com>",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .js,.jsx"
+  },
+  "dependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.35.0",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "vite": "^7.3.1"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "keywords": [
+    "real-estate",
+    "housing",
+    "tracker",
+    "zillow",
+    "redfin",
+    "react"
+  ],
+  "main": "dist/nesttrack.umd.js",
+  "module": "dist/nesttrack.es.js",
+  "exports": {
+    ".": {
+      "import": "./dist/nesttrack.es.js",
+      "require": "./dist/nesttrack.umd.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
