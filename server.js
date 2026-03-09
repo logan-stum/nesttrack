@@ -2,13 +2,13 @@ import express from "express";
 import cors from "cors";
 import "dotenv/config";
 
-const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://yourusername.github.io"
+    "https://logan-stum.github.io"
   ]
 }));
+
 app.use(express.json());
 
 app.get("/api/fetch-listing", async (req, res) => {
