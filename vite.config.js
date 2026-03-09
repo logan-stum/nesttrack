@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  base: "https://github.com/logan-stum/nesttrack", // must match your GitHub repo name exactly
   build: {
     lib: {
       entry: "src/nesttrack.jsx",

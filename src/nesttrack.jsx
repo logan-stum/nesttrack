@@ -648,11 +648,13 @@ export default function NestTrack() {
   const fetchListing = async () => {
     if (!fetchUrl.trim()) return;
     setFetchStatus("loading");
+    const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+
     try {
-      const [detailsRes, photosRes] = await Promise.all([
-        fetch(`http://localhost:3001/api/fetch-listing?url=${encodeURIComponent(fetchUrl)}`),
-        fetch(`http://localhost:3001/api/fetch-photos?url=${encodeURIComponent(fetchUrl)}`),
-      ]);
+        const [detailsRes, photosRes] = await Promise.all([
+          fetch(`${API_BASE}/api/fetch-listing?url=${encodeURIComponent(fetchUrl)}`),
+          fetch(`${API_BASE}/api/fetch-photos?url=${encodeURIComponent(fetchUrl)}`),
+        ]);
       const data = await detailsRes.json();
       const photoData = await photosRes.json();
       console.log("PHOTO DATA:", JSON.stringify(photoData, null, 2)); // ADD THIS
